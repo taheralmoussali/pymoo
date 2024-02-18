@@ -1,3 +1,3 @@
-from pymoo.version import __version__
+# from pymoo.version import __version__
 
 
