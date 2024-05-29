@@ -7,13 +7,14 @@ from numpy import linalg as LA
 
 
 def get_crowding_function(label):
-
     if label == "cd":
         fun = FunctionalDiversity(calc_crowding_distance, filter_out_duplicates=False)
     elif (label == "pcd") or (label == "pruning-cd"):
         fun = FunctionalDiversity(load_function("calc_pcd"), filter_out_duplicates=True)
     elif label == "bfe":
         fun = FunctionalDiversity(calc_balanceable_fitness_estimation, filter_out_duplicates=False)
+    elif label == "bfe-static":
+        fun = FunctionalDiversity(calc_balanceable_fitness_estimation_static, filter_out_duplicates=False)
     elif label == "ce":
         fun = FunctionalDiversity(calc_crowding_entropy, filter_out_duplicates=True)
     elif label == "mnn":
@@ -147,7 +148,12 @@ def calc_balanceable_fitness_estimation(F, **kwargs):
             return math.sqrt(sum_)
 
     def normalize(value, min_, max_):
-        return (value - min_) / (max_ - min_)
+        try:
+            return (value - min_) / (max_ - min_)
+        except:
+            # print('min: {} , max: {}'.format(min_, max_))
+            # print('value: {}'.format(value))
+            return value
 
     def apply_normalize_on_objs(pop_objectives, ideal_point):
         """
@@ -223,7 +229,10 @@ def calc_balanceable_fitness_estimation(F, **kwargs):
         SDE_min = min(SDE_s)
         cd_s = []
         for SDE_i in SDE_s:
-            cd_i = (SDE_i - SDE_min) / (SDE_max - SDE_min)
+            try:
+                cd_i = (SDE_i - SDE_min) / (SDE_max - SDE_min)
+            except:
+                cd_i = 0
             cd_s.append(cd_i)
         return cd_s
 
@@ -240,13 +249,13 @@ def calc_balanceable_fitness_estimation(F, **kwargs):
             d1_s.append(d1)
             try:
 
-                d2 = math.sqrt(np.inner((np.array(point) - z_star), (np.array(point) - z_star)) - d1**2)
+                d2 = math.sqrt(np.inner((np.array(point) - z_star), (np.array(point) - z_star)) - d1 ** 2)
             except:
                 print(f'the point = {point} , z_star: {z_star}, d1: {d1}')
                 print(f'point - z_star {(np.array(point) - z_star)}')
                 print(f'the inner for two array {np.inner((np.array(point) - z_star), (np.array(point) - z_star))}')
 
-                d2= 0
+                d2 = 0
             d2_s.append(d2)
         return d1_s, d2_s
 
@@ -330,8 +339,8 @@ def calc_balanceable_fitness_estimation(F, **kwargs):
     # ideal_point = [-0.26386886936020537, -0.038662102103408015, -12685.936307382268, -7.788507340173738]
     # z_end = [5.873340084744861, 0.17553681652439818, 4516.724857386221, 0.898005768872491]
 
-    ideal_point = [0, 0]
-    z_end = [1, 1]
+    ideal_point = [0] * len(F[0])
+    z_end = [1] * len(F[0])
 
     BFE = []
     normalized_objectives = apply_normalize_on_objs(F, ideal_point)
@@ -351,10 +360,152 @@ def calc_balanceable_fitness_estimation(F, **kwargs):
         d2 = d2_s[index]
         # calculate alpha and beta for this particle
         a_b_dic = get_alpha_beta(c_d, c_v, d1, d2, boundaries)
-
         _BFE = a_b_dic['alpha'] * c_d + a_b_dic['beta'] * c_v
         BFE.append(_BFE)
     return BFE
+
+
+def calc_balanceable_fitness_estimation_static(F, **kwargs):
+    """
+      BFE (Balanceable Fitness Estimation)
+      return the values of BFE for each paricle in F
+    """
+
+    def Euclidean_distance(point_1, point_2):
+        """
+        calculate the Euclidean distance between two points
+
+        Parameters:
+        - point1: list like [x1, x2, x3, ... ]
+        - point2: list like [x1, x2, x3, ... ]
+
+        Returns:
+        - The Euclidean distance between the two points.
+        """
+        if len(point_1) != len(point_2):
+            return 'there is diff in dimantion !!!'
+        else:
+            sum_ = 0
+            for i in range(len(point_1)):
+                x1 = point_1[i]
+                x2 = point_2[i]
+                sum_ += (x2 - x1) ** 2
+            return math.sqrt(sum_)
+
+    def normalize(value, min_, max_):
+        try:
+            return (value - min_) / (max_ - min_)
+        except:
+            # print('min: {} , max: {}'.format(min_, max_))
+            # print('value: {}'.format(value))
+            return value
+
+    def apply_normalize_on_objs(pop_objectives, ideal_point):
+        """
+        input
+        """
+        list_0 = []
+        for pop in pop_objectives:
+            list_1 = [Euclidean_distance([x1], [x2]) for x1, x2 in zip(pop, ideal_point)]
+            list_0.append(list_1)
+
+        # Transpose the list to work with columns
+        transposed_example = list(zip(*list_0))
+
+        # Find the max and min for each column
+        max_values = [max(column) for column in transposed_example]
+        min_values = [min(column) for column in transposed_example]
+        normalized = []
+        for obj in list_0:
+            normalize_ = [normalize(value, min_, max_) for value, min_, max_ in zip(obj, min_values, max_values)]
+            normalized.append(normalize_)
+        return normalized
+
+    def calculate_convergence(pop):
+        '''
+        pop: list where each item contains list of objective functions
+        '''
+
+        def dis(list_objectives):
+            '''
+            input:
+            list_objective: normalized objectives
+            '''
+            objectives_p_2 = [item ** 2 for item in list_objectives]
+            return math.sqrt(sum(objectives_p_2))
+
+        # convergence ---
+        convergence_list = []
+        for p_i in pop:
+            m = len(p_i)
+            c_v = 1 - (dis(p_i) / math.sqrt(m))
+            convergence_list.append(c_v)
+        return convergence_list
+
+    def calculate_SDE(normalized_objs):
+        """
+        caluculate the Shift-Based Density
+        """
+        SDE_s = []
+
+        def sde_0(value1, value2):
+            if value2 > value1:
+                return value2 - value1
+            else:
+                return 0
+
+        for p_i in normalized_objs:
+            collect_sde = []
+            list_ = normalized_objs.copy()
+            list_.remove(p_i)
+            for p_j in list_:
+                collect_sde.append(math.sqrt(sum([sde_0(i, j) ** 2 for i, j in zip(p_i, p_j)])))
+
+            SDE_i = min(collect_sde)
+            SDE_s.append(SDE_i)
+        return SDE_s
+
+    def calculate_diversity(normalized_objs):
+        '''
+        pop: list where each item contains list of objective functions
+        '''
+        SDE_s = calculate_SDE(normalized_objs)
+        SDE_max = max(SDE_s)
+        SDE_min = min(SDE_s)
+        cd_s = []
+        for SDE_i in SDE_s:
+            try:
+                cd_i = (SDE_i - SDE_min) / (SDE_max - SDE_min)
+            except:
+                cd_i = 0
+            cd_s.append(cd_i)
+        return cd_s
+
+    # ideal_point = [-0.26386886936020537, -0.038662102103408015, -12685.936307382268, -7.788507340173738]
+    # z_end = [5.873340084744861, 0.17553681652439818, 4516.724857386221, 0.898005768872491]
+
+    # ideal_point = [0, 0]
+    # z_end = [1, 1]
+
+    ideal_point = [0] * len(F[0])
+    z_end = [1] * len(F[0])
+
+    BFE = []
+    normalized_objectives = apply_normalize_on_objs(F, ideal_point)
+    cd_s = calculate_convergence(normalized_objectives)
+    cv_s = calculate_diversity(normalized_objectives)
+
+    for index, particle in enumerate(F):
+        # calculate value of diversity and convergence for this particle
+        c_d = cd_s[index]
+        c_v = cv_s[index]
+        # calculate alpha and beta for this particle
+        alpha = 0
+        beta = 1
+        _BFE = alpha * c_d + beta * c_v
+        BFE.append(_BFE)
+    return BFE
+
 
 def calc_crowding_entropy(F, **kwargs):
     """Wang, Y.-N., Wu, L.-H. & Yuan, X.-F., 2010. Multi-objective self-adaptive differential 
@@ -424,7 +575,6 @@ def calc_2nn_fast(F, **kwargs):
 
 
 def _calc_mnn_fast(F, n_neighbors, **kwargs):
-
     # calculate the norm for each objective - set to NaN if all values are equal
     norm = np.max(F, axis=0) - np.min(F, axis=0)
     norm[norm == 0] = 1.0
@@ -437,7 +587,7 @@ def _calc_mnn_fast(F, n_neighbors, **kwargs):
 
     # M neighbors
     M = F.shape[1]
-    _D = np.partition(D, range(1, M+1), axis=1)[:, 1:M+1]
+    _D = np.partition(D, range(1, M + 1), axis=1)[:, 1:M + 1]
 
     # Metric d
     d = np.prod(_D, axis=1)
