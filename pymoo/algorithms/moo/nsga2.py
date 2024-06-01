@@ -12,6 +12,50 @@ from pymoo.termination.default import DefaultMultiObjectiveTermination
 from pymoo.util.display.multi import MultiObjectiveOutput
 from pymoo.util.dominator import Dominator
 from pymoo.util.misc import has_feasible
+from scipy.optimize import dual_annealing
+import numpy as np
+
+
+
+def simulated_annealing(func, x0, bounds, max_iter=1000, initial_temp=1000, cooling_rate=0.99, min_temp=1e-3):
+    # Initialize variables
+    current_solution = x0
+    current_value = func(current_solution)
+    best_solution = current_solution
+    best_value = current_value
+    temp = initial_temp
+
+    # Convert bounds to a NumPy array if it's a list of tuples
+    bounds = np.array(bounds)
+
+    # Annealing process
+    for i in range(max_iter):
+        # Generate a new candidate solution
+        candidate_solution = current_solution + np.random.uniform(-0.1, 0.1, size=len(x0))
+        
+        # Ensure the candidate solution is within bounds
+        candidate_solution = np.clip(candidate_solution, bounds[:, 0], bounds[:, 1])
+        
+        candidate_value = func(candidate_solution)
+
+        # Decide whether to accept the candidate solution
+        if candidate_value < current_value or np.random.rand() < np.exp((current_value - candidate_value) / temp):
+            current_solution = candidate_solution
+            current_value = candidate_value
+
+        # Update the best solution found
+        if candidate_value < best_value:
+            best_solution = candidate_solution
+            best_value = candidate_value
+
+        # Decrease the temperature
+        temp *= cooling_rate
+
+        # If the temperature is too low, break the loop
+        if temp < min_temp:
+            break
+
+    return best_solution
 
 
 # ---------------------------------------------------------------------------------------------------------
@@ -113,5 +157,50 @@ class NSGA2(GeneticAlgorithm):
         else:
             self.opt = self.pop[self.pop.get("rank") == 0]
 
+
+class NSGA2_SA(GeneticAlgorithm):
+
+    def __init__(self,
+                 pop_size=100,
+                 sampling=FloatRandomSampling(),
+                 selection=TournamentSelection(func_comp=binary_tournament),
+                 crossover=SBX(eta=15, prob=0.9),
+                 mutation=PM(eta=20),
+                 survival=RankAndCrowding(),
+                 output=MultiObjectiveOutput(),
+                 **kwargs):
+        
+        super().__init__(
+            pop_size=pop_size,
+            sampling=sampling,
+            selection=selection,
+            crossover=crossover,
+            mutation=mutation,
+            survival=survival,
+            output=output,
+            advance_after_initial_infill=True,
+            **kwargs)
+
+        self.termination = DefaultMultiObjectiveTermination()
+        self.tournament_type = 'comp_by_dom_and_crowding'
+
+    def _set_optimum(self, **kwargs):
+        if not has_feasible(self.pop):
+            self.opt = self.pop[[np.argmin(self.pop.get("CV"))]]
+        else:
+            self.opt = self.pop[self.pop.get("rank") == 0]
+
+    def _advance(self, infills=None, **kwargs):
+        super()._advance(infills=infills, **kwargs)
+
+        # Apply Simulated Annealing to each solution in the population
+        for ind in self.pop:
+            x0 = ind.X  # Current solution
+            bounds = [(lb, ub) for lb, ub in zip(self.problem.xl, self.problem.xu)]  # Variable bounds
+            func = lambda x: self.problem.evaluate(x)[0]  # Objective function
+
+            new_x = simulated_annealing(func, x0, bounds)  # Apply standard SA
+            ind.set("X", new_x)  # Update solution
+            self.evaluator.eval(self.problem, ind)  # Re-evaluate solution
 
 parse_doc_string(NSGA2.__init__)
