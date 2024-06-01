@@ -17,7 +17,7 @@ import numpy as np
 
 
 
-def simulated_annealing(func, x0, bounds, max_iter=1000, initial_temp=1000, cooling_rate=0.99, min_temp=1e-3):
+def simulated_annealing(func, x0, bounds, max_iter=100, initial_temp=100, cooling_rate=0.99, min_temp=1e-3):
     # Initialize variables
     current_solution = x0
     current_value = func(current_solution)
