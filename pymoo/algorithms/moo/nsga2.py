@@ -1,6 +1,5 @@
 import numpy as np
 import warnings
-
 from pymoo.algorithms.base.genetic import GeneticAlgorithm
 from pymoo.docs import parse_doc_string
 from pymoo.operators.crossover.sbx import SBX
@@ -15,8 +14,6 @@ from pymoo.util.misc import has_feasible
 from scipy.optimize import dual_annealing
 import numpy as np
 
-
-
 def simulated_annealing(func, x0, bounds, max_iter=100, initial_temp=100, cooling_rate=0.99, min_temp=1e-3):
     # Initialize variables
     current_solution = x0
@@ -28,6 +25,9 @@ def simulated_annealing(func, x0, bounds, max_iter=100, initial_temp=100, coolin
     # Convert bounds to a NumPy array if it's a list of tuples
     bounds = np.array(bounds)
 
+    # Dominator instance
+    dominator = Dominator()
+
     # Annealing process
     for i in range(max_iter):
         # Generate a new candidate solution
@@ -38,13 +38,13 @@ def simulated_annealing(func, x0, bounds, max_iter=100, initial_temp=100, coolin
         
         candidate_value = func(candidate_solution)
 
-        # Decide whether to accept the candidate solution
-        if candidate_value < current_value or np.random.rand() < np.exp((current_value - candidate_value) / temp):
+        # Decide whether to accept the candidate solution based on dominance
+        if dominator.get_relation(candidate_value, current_value) == -1 or np.random.rand() < np.exp((np.sum(current_value) - np.sum(candidate_value)) / temp):
             current_solution = candidate_solution
             current_value = candidate_value
 
-        # Update the best solution found
-        if candidate_value < best_value:
+        # Update the best solution found based on dominance
+        if dominator.get_relation(candidate_value, best_value) == -1:
             best_solution = candidate_solution
             best_value = candidate_value
 
@@ -61,7 +61,6 @@ def simulated_annealing(func, x0, bounds, max_iter=100, initial_temp=100, coolin
 # ---------------------------------------------------------------------------------------------------------
 # Binary Tournament Selection Function
 # ---------------------------------------------------------------------------------------------------------
-
 
 def binary_tournament(pop, P, algorithm, **kwargs):
     n_tournaments, n_parents = P.shape
@@ -110,7 +109,6 @@ def binary_tournament(pop, P, algorithm, **kwargs):
 # Survival Selection
 # ---------------------------------------------------------------------------------------------------------
 
-
 class RankAndCrowdingSurvival(RankAndCrowding):
     
     def __init__(self, nds=None, crowding_func="cd"):
@@ -123,7 +121,6 @@ class RankAndCrowdingSurvival(RankAndCrowding):
 # =========================================================================================================
 # Implementation
 # =========================================================================================================
-
 
 class NSGA2(GeneticAlgorithm):
 
@@ -156,7 +153,6 @@ class NSGA2(GeneticAlgorithm):
             self.opt = self.pop[[np.argmin(self.pop.get("CV"))]]
         else:
             self.opt = self.pop[self.pop.get("rank") == 0]
-
 
 class NSGA2_SA(GeneticAlgorithm):
 
@@ -197,7 +193,7 @@ class NSGA2_SA(GeneticAlgorithm):
         for ind in self.pop:
             x0 = ind.X  # Current solution
             bounds = [(lb, ub) for lb, ub in zip(self.problem.xl, self.problem.xu)]  # Variable bounds
-            func = lambda x: self.problem.evaluate(x)[0]  # Objective function
+            func = lambda x: self.problem.evaluate(x)  # Objective function
 
             new_x = simulated_annealing(func, x0, bounds)  # Apply standard SA
             ind.set("X", new_x)  # Update solution
